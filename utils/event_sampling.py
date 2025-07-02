@@ -126,7 +126,7 @@ def get_data_pixel_coordinates(event_dataarray):
     """
     Extracts the coordinates of the pixels in the event dataset that actually have data. This function is used for sampling.
     Parameters:
-    - event_dataset (xr.Dataset): The dataset containing the event data.
+    - event_dataset (xr.DataArray): The DataArray containing the event data.
     Returns:
     - coordinates (pandas.DataFrame): A DataFrame containing the coordinates of the pixels in the event dataset that actually have values.
     """
