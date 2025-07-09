@@ -3,6 +3,7 @@ import pandas as pd
 import xarray as xr
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
+from typing import Literal
 
 
 def plot_event_day(event_array, day):
@@ -200,4 +201,37 @@ def plot_kndvi_time_series_with_baseline(event_array, lat, lon, event_label, eve
     plt.ylabel("kNDVI")
     plt.legend()
     plt.grid(True)
+    plt.show()
+
+
+def plot_aggregated_ts(df_time_series, 
+                       start_time_value, 
+                       end_time_value, 
+                       method: Literal['mean', 'median', 'min', 'max']):
+    """
+    Plots aggregated kNDVI time series per vegetation class for a given extreme event.
+
+    Parameters:
+       df_time_series (pandas.DataFrame): DataFrame with aggregated kNDVI time series.
+       start_time_value (datetime): Start time of the event.
+       end_time_value (datetime): End time of the event.
+       method (str): The method used for aggregation ('mean', 'median', 'min', 'max'). 
+    """
+
+
+    df_time_series.plot(figsize=(12, 6))
+    plt.axvline(start_time_value, color='red', linestyle='--', label='Event Start')
+    plt.axvline(end_time_value, color='blue', linestyle='--', label='Event End')
+    plt.title(f"{method} kNDVI Time Series per Vegetation Class")
+    plt.xlabel("Time")
+    plt.ylabel("kNDVI")
+    # Legend outside (right side)
+    plt.legend(
+        title="Veg Class",
+        bbox_to_anchor=(1.02, 1),  # shift right outside
+        loc='upper left',
+        borderaxespad=0
+    )
+    plt.grid(True)
+    plt.tight_layout()
     plt.show()
