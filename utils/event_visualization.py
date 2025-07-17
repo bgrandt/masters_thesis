@@ -207,7 +207,8 @@ def plot_kndvi_time_series_with_baseline(event_array, lat, lon, event_label, eve
 def plot_aggregated_ts(df_time_series, 
                        start_time_value, 
                        end_time_value, 
-                       method: Literal['mean', 'median', 'min', 'max']):
+                       method: Literal['Mean', 'Median', 'Min', 'Max'],
+                       df_translation: pd.DataFrame = None):
     """
     Plots aggregated kNDVI time series per vegetation class for a given extreme event.
 
@@ -215,9 +216,16 @@ def plot_aggregated_ts(df_time_series,
        df_time_series (pandas.DataFrame): DataFrame with aggregated kNDVI time series.
        start_time_value (datetime): Start time of the event.
        end_time_value (datetime): End time of the event.
-       method (str): The method used for aggregation ('mean', 'median', 'min', 'max'). 
+       method (str): The method used for aggregation ('mean', 'median', 'min', 'max').
+       df_translation (pandas.DataFrame): DataFrame with columns 'class' and 'label' for translation of vegetation classes. 
     """
 
+    if df_translation is not None:
+        # Create mapping of class labels to class names
+        translation_dict = dict(zip(df_translation.index, df_translation.iloc[:, 0]))
+
+        # Rename df_grouped columns (excluding time index if it's part of the DataFrame)
+        df_time_series = df_time_series.rename(columns=translation_dict)
 
     df_time_series.plot(figsize=(12, 6))
     plt.axvline(start_time_value, color='red', linestyle='--', label='Event Start')

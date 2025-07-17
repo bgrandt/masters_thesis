@@ -1,6 +1,57 @@
 import numpy as np
 import pandas as pd
 import xarray as xr
+import numbers
+
+def get_data_pixel_coordinates(event_dataarray):
+    """
+    Extracts the coordinates of the pixels in the event dataset that actually have data.
+    
+    Parameters:
+    - event_dataarray (xr.DataArray): The DataArray containing the event data.
+    
+    Returns:
+    - coordinates (pandas.DataFrame): A DataFrame with coordinates of pixels that have data.
+    """
+
+    if not isinstance(event_dataarray, xr.DataArray):
+        raise TypeError("Input must be an xarray.DataArray")
+
+    # Convert binary 0/1 array to boolean
+    if set(np.unique(event_dataarray.values)).issubset({0, 1}):
+        event_dataarray = event_dataarray.astype(bool)
+
+    dims = event_dataarray.dims
+
+    # Create mask depending on array dimensionality
+    if len(dims) == 3:
+        # Collapse time axis
+        if event_dataarray.dtype == bool:
+            mask = event_dataarray.any(dim=dims[0]).compute()
+        else:
+            mask = ~np.all(np.isnan(event_dataarray), axis=0).compute()
+    elif len(dims) == 2:
+        if event_dataarray.dtype == bool:
+            mask = event_dataarray.compute()
+        else:
+            mask = ~np.isnan(event_dataarray).compute()
+    else:
+        raise ValueError(f"Expected 2D or 3D array, got {len(dims)}D.")
+
+    # Get indices of True values in the mask
+    true_idx = np.where(mask)
+
+    # Extract coordinate names (lat/lon/x/y)
+    coords = [c for c in mask.coords if c in ['lat', 'lon', 'x', 'y']]
+    
+    # Extract the coordinate values
+    coord_data = {c: mask[c].values[true_idx[i]] for i, c in enumerate(coords)}
+    
+    # Convert to DataFrame
+    coordinates = pd.DataFrame(coord_data)
+
+    return coordinates
+
 
 def create_event_mask(event_label, event_table, labelcube, land_mask):
     """ 
@@ -17,7 +68,7 @@ def create_event_mask(event_label, event_table, labelcube, land_mask):
     """
 
     # Error handling if label is not an integer
-    if not isinstance(event_label, int):
+    if not isinstance(event_label, numbers.Integral):
         raise TypeError(f"Expected event_label to be an int, but got {type(event_label).__name__}")
 
     # Get event time range
@@ -25,19 +76,28 @@ def create_event_mask(event_label, event_table, labelcube, land_mask):
     end_date = event_table[event_table['label'] == event_label]['end_time'].iloc[0]
     timestamps = pd.date_range(start=start_date, end=end_date, freq="D")
 
-    # Get the shape of the labelcube spatial dimensions
-    time_slice_shape = labelcube.sizes['latitude'], labelcube.sizes['longitude']
-
     # Select time slices where event may have occurred
-    event_labels = labelcube.sel(Ti=timestamps)['labels']
+    event_labels = labelcube.sel(Ti=timestamps)['labels'] # DO i need method='nearest'?
+
+    # Deubgging: see if there are any time slices after selection
+    if event_labels.size == 0:
+        raise ValueError(f"No time slices found for event label {event_label}")
 
     # Identify affected grid cells
     affected_area_mask = np.any(event_labels == event_label, axis=0)
 
+    # Debugging: see if there are any affected grid cells
+    if not np.any(affected_area_mask):
+        raise ValueError(f"No affected grid cells found for event label {event_label}. There might be no grid cells with this label.")
+
     # Replace NaNs with 0
     affected_area_mask = np.where(np.isnan(affected_area_mask), 0, affected_area_mask)
 
-    # Longitude wrapping if needed (convert from 0–360 to -180–180)
+    # Debugging: check if there are any True values in the mask
+    if not np.any(affected_area_mask):
+        raise ValueError(f"Mask does not contain values after replacing NaNs.")
+
+    # Longitude wrapping (convert from 0–360 to -180–180)
     lon_orig = labelcube['longitude']
     lon_orig_wrapped = np.where(lon_orig > 180, lon_orig - 360, lon_orig)
     sorted_indices = np.argsort(lon_orig_wrapped)
@@ -56,14 +116,18 @@ def create_event_mask(event_label, event_table, labelcube, land_mask):
     # Rename to match the land_mask dimensions
     affected_area_mask_da = affected_area_mask_da.rename({"latitude": "lat", "longitude": "lon"})
 
-    # Interpolate land mask to match event mask resolution/coordinates if needed
+    # Interpolate land mask to match event mask resolution/coordinates
     land_mask_interp = land_mask.sel(time=land_mask.time[0]).drop("time")
     land_mask_interp = land_mask_interp.interp(lat=affected_area_mask_da.lat, lon=affected_area_mask_da.lon)
+
+    # Debugging: check if interpolation was successful
+    if not np.any(land_mask_interp): 
+        raise ValueError("Interpolation resulted in NaNs.")
 
     # Apply the land mask: keep only where land_mask == 1
     land_bool_mask = (land_mask_interp == 1)
     masked_event = affected_area_mask_da.where(land_bool_mask, 0)
-
+    
     return masked_event
 
 
@@ -85,12 +149,12 @@ def create_event_dataarray(d_array, event_mask, event_table, event_label, time_b
     - xarray DataArray minicube containing data where the event mask is True and a time buffer before and after the event.
     """
 ############
-    # Define region of interest for cropping with 5 degrees buffer
-    lon_min = event_table[event_table['label'] == event_label]['longitude_min'].iloc[0] - 5
-    lon_max = event_table[event_table['label'] == event_label]['longitude_max'].iloc[0] + 5 
-    lat_min = event_table[event_table['label'] == event_label]['latitude_min'].iloc[0] - 5
-    lat_max = event_table[event_table['label'] == event_label]['latitude_max'].iloc[0] + 5
-
+    ## Crop to region of interest ###
+    df_coords = get_data_pixel_coordinates(event_mask)
+    lat_min = df_coords['lat'].min() - 5
+    lat_max = df_coords['lat'].max() + 5
+    lon_min = df_coords['lon'].min() - 5
+    lon_max = df_coords['lon'].max() + 5
 #############
 
     # Regrid affected area mask to match the dataset's grid
@@ -121,28 +185,8 @@ def create_event_dataarray(d_array, event_mask, event_table, event_label, time_b
     return event_cube
 
 
-def get_data_pixel_coordinates(event_dataarray):
 
-    """
-    Extracts the coordinates of the pixels in the event dataset that actually have data. This function is used for sampling.
-    Parameters:
-    - event_dataset (xr.DataArray): The DataArray containing the event data.
-    Returns:
-    - coordinates (pandas.DataFrame): A DataFrame containing the coordinates of the pixels in the event dataset that actually have values.
-    """
-   
-    # Create a boolean mask that is True where the data is not NaN for at least one time slice
-    mask = ~np.all(np.isnan(event_dataarray), axis=0).compute()
+
+
     
-    # Get the coordinates of the True values in the mask
-    mask = mask.where(mask, drop=True)
-
-    # Extract coordinates of True values
-    coordinates = (
-    mask.to_dataframe(name="has_data")
-        .query("has_data == True")
-        .reset_index()[['lat', 'lon']]
-    )
-
-    return coordinates
 
