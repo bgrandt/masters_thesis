@@ -4,6 +4,14 @@ import numpy as np
 import xarray as xr
 from statsmodels.tsa.seasonal import STL
 
+
+PERIOD=47
+SEASONAL=181
+TREND=49
+INNER_ITER=1
+OUTER_ITER=15
+LOW_PASS=107
+
 def aggregate_kndvi_timeseries(
     kndvi_array, 
     vegetation_array,
@@ -61,9 +69,10 @@ def aggregate_kndvi_timeseries(
     kndvi_df['veg_class'] = veg_valid.values      # Add vegetation class column                      
 
     #### TS aggregation per land cover type ####
+
     # Group by vegetation class and transpose to have time as index
     if method == 'mean':
-        df_grouped = kndvi_df.groupby('veg_class').mean().T 
+        df_grouped = kndvi_df.groupby('veg_class').mean().T
     elif method == 'median':
         df_grouped = kndvi_df.groupby('veg_class').median().T 
     elif method == 'min':
@@ -104,7 +113,7 @@ def ts_decomposition(df,
         time_series = df[column]
 
         # Decomposition
-        decomp = STL(time_series, period=47, seasonal=45, trend=49, robust=True).fit(inner_iter=1, outer_iter=15) # Parameters determined by optimization
+        decomp = STL(time_series, period=PERIOD, seasonal=SEASONAL, trend=TREND, low_pass=LOW_PASS,robust=True).fit(inner_iter=INNER_ITER, outer_iter=OUTER_ITER) # Parameters determined by optimization
 
         # Retrieve components  
         seasonal = decomp.seasonal
@@ -127,6 +136,7 @@ def ts_decomposition(df,
     return df_decomposed
 
 
+
 def calculate_event_stats(df_time_series, start_time_value, end_time_value):    
     
     """
@@ -138,14 +148,20 @@ def calculate_event_stats(df_time_series, start_time_value, end_time_value):
     Returns:
     - pd.DataFrame: Dataframe containing event statistics.
     """
-    
+    # Calculate time buffer to caputre lagged responses
+    event_duration = end_time_value - start_time_value
+    buffer_duration = event_duration * 0.5
+    extended_end_time = end_time_value + buffer_duration
+
+
     df_stats = pd.DataFrame.from_dict({ # Put directly in dataframe
         'vpre': df_time_series.loc[
             df_time_series.index < start_time_value
         ].mean(), # Vpre
 
         'vdist': df_time_series.loc[
-            start_time_value:end_time_value
+            (df_time_series.index >= start_time_value) & 
+            (df_time_series.index <= extended_end_time)
         ].min(), # Vdist (simple version)
 
         'vpost': df_time_series.loc[
@@ -160,8 +176,6 @@ def calculate_event_stats(df_time_series, start_time_value, end_time_value):
     df_stats.loc['recovery'] = df_stats.loc['vpost'] - df_stats.loc['vdist'] / df_stats.loc['vpre'] - df_stats.loc['vdist']
 
     return df_stats
-
-
 
 def calculate_n_days_affected(start_date, end_date, event_mask, event_label, ds_label):
 

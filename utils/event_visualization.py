@@ -227,9 +227,15 @@ def plot_aggregated_ts(df_time_series,
         # Rename df_grouped columns (excluding time index if it's part of the DataFrame)
         df_time_series = df_time_series.rename(columns=translation_dict)
 
+    # Calculate time buffer to caputre lagged responses
+    event_duration = end_time_value - start_time_value
+    buffer_duration = event_duration * 0.5
+    extended_end_time = end_time_value + buffer_duration
+
     df_time_series.plot(figsize=(12, 6))
     plt.axvline(start_time_value, color='red', linestyle='--', label='Event Start')
     plt.axvline(end_time_value, color='blue', linestyle='--', label='Event End')
+    plt.axvline(extended_end_time, color='green', linestyle='--', label='Extended End')
     plt.title(f"{method} kNDVI Time Series per Vegetation Class")
     plt.xlabel("Time")
     plt.ylabel("kNDVI")
