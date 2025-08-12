@@ -178,7 +178,7 @@ def create_event_mask(event_label, event_table, labelcube, land_mask):
 
 
 
-def create_event_dataarray(d_array, event_mask, event_table, event_label, time_buffer=60):
+def create_event_dataarray(d_array, event_mask, start_date, end_date, time_buffer=0):
 
     """
     Returns a minicube of the event with the event mask applied and a time buffer before and after the event.
@@ -186,7 +186,8 @@ def create_event_dataarray(d_array, event_mask, event_table, event_label, time_b
     Parameters:
     - d_array (xarray.DataArray): containing the data (usually kNDVI) that has to be masked.
     - event_mask (xarray.DataArray): DataArray with the boolean information of the affected area.
-    - event_label (int): label of the event.
+    - start_date (str): start date of the event.
+    - end_date (str): end date of the event.
     - time_buffer (int): number of days to be added before and after the end of the event.
 
     Returns:
@@ -211,8 +212,6 @@ def create_event_dataarray(d_array, event_mask, event_table, event_label, time_b
     dataset_masked = d_array.where(affected_area_mask_regridded)
 
     # Create a list of timestamps for one event
-    start_date = event_table[event_table['label'] == event_label]['start_time'].iloc[0]
-    end_date = event_table[event_table['label'] == event_label]['end_time'].iloc[0]
     timestamps = pd.date_range(start=start_date, end=end_date, freq="D")
     
     # Add a time buffer before and after the event

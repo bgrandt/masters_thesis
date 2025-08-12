@@ -156,8 +156,8 @@ def plot_kndvi_time_series_with_baseline(event_array, lat, lon, event_label, eve
     # Extract time series for the given point
     event_ts = event_array.sel(lat=lat, lon=lon, method="nearest")
 
-    # Compute the historical average from previous 20 years
-    first_year = start_date.year - 20
+    # Compute the historical average from previous 2 years
+    first_year = start_date.year - 2
     last_year = start_date.year - 1
 
     # Time points from the event for day-of-year reference
@@ -166,7 +166,7 @@ def plot_kndvi_time_series_with_baseline(event_array, lat, lon, event_label, eve
     # Extract full time series for the location
     full_ts = full_kndvi_data.sel(lat=lat, lon=lon, method="nearest")
 
-    # Select the 20-year baseline range
+    # Select the 2-year baseline range
     full_ts_20yr = full_ts.sel(time=slice(f"{first_year}", f"{last_year}"))
 
     # Ensure time is a datetime index
