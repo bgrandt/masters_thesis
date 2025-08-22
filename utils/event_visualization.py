@@ -207,13 +207,13 @@ def plot_kndvi_time_series_with_baseline(event_array, lat, lon, event_label, eve
 def plot_aggregated_ts(df_time_series, 
                        start_time_value, 
                        end_time_value, 
-                       method: Literal['Mean', 'Median', 'Min', 'Max'],
+                       variable: str,
                        df_translation: pd.DataFrame = None):
     """
-    Plots aggregated kNDVI time series per vegetation class for a given extreme event.
+    Plots aggregated  time series per vegetation class for a given extreme event.
 
     Parameters:
-       df_time_series (pandas.DataFrame): DataFrame with aggregated kNDVI time series.
+       df_time_series (pandas.DataFrame): DataFrame with aggregated time series.
        start_time_value (datetime): Start time of the event.
        end_time_value (datetime): End time of the event.
        method (str): The method used for aggregation ('mean', 'median', 'min', 'max').
@@ -236,9 +236,9 @@ def plot_aggregated_ts(df_time_series,
     plt.axvline(start_time_value, color='red', linestyle='--', label='Event Start')
     plt.axvline(end_time_value, color='blue', linestyle='--', label='Event End')
     plt.axvline(extended_end_time, color='green', linestyle='--', label='Extended End')
-    plt.title(f"{method} kNDVI Time Series per Vegetation Class")
+    plt.title(f"{variable} Time Series per Vegetation Class")
     plt.xlabel("Time")
-    plt.ylabel("kNDVI")
+    plt.ylabel(variable)
     # Legend outside (right side)
     plt.legend(
         title="Veg Class",

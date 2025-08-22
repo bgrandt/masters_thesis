@@ -3,6 +3,7 @@ import pandas as pd
 import xarray as xr
 import numbers
 
+
 def get_data_pixel_coordinates(event_dataarray):
     """
     Extracts the coordinates of the pixels in the event dataset that actually have data.
@@ -97,7 +98,7 @@ def get_data_pixel_coordinates(event_dataarray):
 
 
 
-def create_event_mask(event_label, event_table, labelcube, land_mask):
+def create_event_mask(event_label, start_date, end_date, labelcube, land_mask):
     """ 
     Creates the affected area mask for a given event label, applying a land mask.
 
@@ -116,8 +117,6 @@ def create_event_mask(event_label, event_table, labelcube, land_mask):
         raise TypeError(f"Expected event_label to be an int, but got {type(event_label).__name__}")
 
     # Get event time range
-    start_date = event_table[event_table['label'] == event_label]['start_time'].iloc[0]
-    end_date = event_table[event_table['label'] == event_label]['end_time'].iloc[0]
     timestamps = pd.date_range(start=start_date, end=end_date, freq="D")
 
     # Select time slices where event may have occurred
@@ -202,7 +201,17 @@ def create_event_dataarray(d_array, event_mask, start_date, end_date, time_buffe
     lon_max = df_coords['lon'].max() + 5
 #############
 
-    # Regrid affected area mask to match the dataset's grid
+    # Handle dimension naming 
+    if 'Ti' in d_array.dims:
+        d_array = d_array.rename({'Ti': 'time'})
+    
+    if 'latitude' in d_array.dims:
+        d_array = d_array.rename({'latitude': 'lat'})
+
+    if 'longitude' in d_array.dims:
+        d_array = d_array.rename({'longitude': 'lon'})
+
+    # Regrid event mask to match data array
     affected_area_mask_regridded = event_mask.interp(lat=d_array.lat, lon=d_array.lon, method="nearest")
 
     # Change mask to boolean
@@ -221,15 +230,32 @@ def create_event_dataarray(d_array, event_mask, start_date, end_date, time_buffe
     dataset_masked = dataset_masked.sel(time=timestamps, method='nearest')
 
     # Crop to bounding box
-    event_cube = dataset_masked.sel(
-    lon=slice(lon_min, lon_max),
-    lat=slice(lat_min, lat_max))
+    if d_array.lat.values[0] > d_array.lat.values[-1]:
+        # lat is descending
+        event_cube = dataset_masked.sel(
+            lon=slice(lon_min, lon_max),
+            lat=slice(lat_max, lat_min)  # reverse bounds
+        )
+    else:
+        # lat is ascending
+        event_cube = dataset_masked.sel(
+            lon=slice(lon_min, lon_max),
+            lat=slice(lat_min, lat_max)
+        )
+
 
     return event_cube
 
 
+def check_for_other_events(start_date, end_date, event_mask, labelcube, label, events):
 
+    # Create labelcube subset for event
+    subset = create_event_dataarray(labelcube['labels'], event_mask, start_date, end_date, time_buffer=2*365)
+    subset_events = np.unique(subset.values)
 
+    # Create list with matching events despite actual event
+    other_events = [int(ev) for ev in subset_events if not np.isnan(ev) and int(ev) != label]
 
+    return any(ev in events for ev in other_events)
     
 

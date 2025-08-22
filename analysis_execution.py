@@ -49,8 +49,9 @@ PATH_LABELS = 'data/temp_zarr_extracted/mergedlabels_ranked_pot0.01_ne0.1_cmp_S1
 PATH_LANDMASK = "data/GLDASp5_landmask_025d.nc4"
 PATH_VEG = 'data/GLDASp5_domveg_NOAH3.6_025d.nc4'
 PATH_TRANSLATION = "data/GLDA_veg_legend.csv"
-THRESHOLD_DURATION_DAYS = 18
-DECOMP_METHOD = 'deseasonalized' # or 'residuals'
+THRESHOLD_DURATION_DAYS = 18 # May has to be adapted because not enough events are included
+ESDC_SUBSET_PATH = 'data/esdc_subset.zarr' # Can be path to local directory or url to cloud storage
+OUTPUT_PATH = 'data/output/21_08.csv'
 
 if __name__ == "__main__":
 
@@ -59,17 +60,28 @@ if __name__ == "__main__":
     # ======================================================
     buffer = 2 * 365 # Days for the temporal buffer around each event
 
+    ## kNDVI array and climatic predictors
+    # Import ESDL dataset
+    ds_esdc = xr.open_zarr(ESDC_SUBSET_PATH)
 
-
-    ## kNDVI array
-    # Import kNDVI dataset
-    url = 'https://data.rsc4earth.de/download/EarthSystemDataCube/v3.0.1/esdc-8d-0.25deg-1x720x1440-3.0.1.zarr/'
-    ds_esdc = xr.open_zarr(url)
-
-    # Select kNDVI
+    # Select kNDVI and predictorvariables
     kndvi = ds_esdc['kndvi']
+    t2m = ds_esdc['air_temperature_2m']
+    t2mmin = ds_esdc['min_air_temperature_2m']
+    t2mmax = ds_esdc['max_air_temperature_2m']
+    prec = ds_esdc['precipitation_era5']
+    soil_moist = ds_esdc['root_moisture']
+    evap = ds_esdc['evaporation']
+    evap_pot = ds_esdc['potential_evaporation']
 
-
+    # Cosine weighting
+    t2m_w = ea.apply_cosine_weighting(t2m)
+    t2mmin_w = ea.apply_cosine_weighting(t2mmin)
+    t2mmax_w = ea.apply_cosine_weighting(t2mmax)
+    prec_w = ea.apply_cosine_weighting(prec)
+    soil_moist_w = ea.apply_cosine_weighting(soil_moist)
+    evap_w = ea.apply_cosine_weighting(evap)
+    evap_pot_w = ea.apply_cosine_weighting(evap_pot)
 
     ## Event summary dataframe
     # URL
@@ -103,11 +115,12 @@ if __name__ == "__main__":
         (df_chd_filtered['end_time'].dt.year <= 2019)
     ]
 
-
+    # Create list of filtered event labels
+    events = df_chd_filtered['label']
+    evets = [int(e) for e in events]
 
     ## Event cube dataset
     ds_chd_labels = xr.open_zarr(PATH_LABELS, consolidated=False)
-
 
 
     ## Land mask array
@@ -116,8 +129,6 @@ if __name__ == "__main__":
 
     # Open the right variable as land mask
     landmask = ds_landmask['GLDAS_mask']
-
-
 
     ## Land cover array and translation dataframe
     # Open with xarray
@@ -128,7 +139,7 @@ if __name__ == "__main__":
 
     # Open class translation dataframe
     df_translation = pd.read_csv(PATH_TRANSLATION, index_col=0)
-
+    
 
     # ======================================================
     # 2. ANALYSIS
@@ -136,6 +147,7 @@ if __name__ == "__main__":
     # Initialize empty list
     df_list = []
 
+    # Loop over events
     for index, row in tqdm(df_chd_filtered.iterrows(), total=len(df_chd_filtered), desc="Processing events"):
         
         label = row['label']
@@ -144,8 +156,16 @@ if __name__ == "__main__":
         # ======================================================
         # 2.1 PREPARE DATA FOR EVENT
         # ======================================================
+        # Start and end time of event
+        start_time = df_chd_filtered.loc[df_chd_filtered['label'] == label, 'start_time'].values[0]
+        end_time = df_chd_filtered.loc[df_chd_filtered['label'] == label, 'end_time'].values[0]
+
+        # From previous year (365 days before event starts)
+        start_time_prev = start_time - pd.Timedelta(days=365)
+        end_time_prev = start_time - pd.Timedelta(days=1)
+
         # Create event mask
-        event_mask = es.create_event_mask(label, event_table=df_chd_filtered, labelcube=ds_chd_labels, land_mask=landmask)
+        event_mask = es.create_event_mask(label, start_date=start_time, end_date=end_time, labelcube=ds_chd_labels, land_mask=landmask)
 
         # Check if event_mask has values, skip event otherwise
         if event_mask.sum().item() == 0:
@@ -153,65 +173,94 @@ if __name__ == "__main__":
             continue
 
         # Create event array
-        kndvi_array = es.create_event_dataarray(kndvi, event_mask, df_chd_filtered, label, time_buffer=buffer)
+        kndvi_array = es.create_event_dataarray(kndvi, event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer)
 
         # Check that the array has values and that the interpolation will not fail
         if kndvi_array.isel(time=0).size == 0 or np.isnan(kndvi_array.isel(time=0).values).all():
             print(f"Skipping event {label} — empty or invalid kNDVI array")
             continue
 
-        # Start and end time of event
-        start_time_value = df_chd_filtered.loc[df_chd_filtered['label'] == label, 'start_time'].values[0]
-        end_time_value = df_chd_filtered.loc[df_chd_filtered['label'] == label, 'end_time'].values[0]
-
-        # From previous year
-        start_time_value_prev = start_time_value - pd.Timedelta(days=365)
-        end_time_value_prev = end_time_value - pd.Timedelta(days=365)
-
         # ======================================================
         # 2.2 AGGREGATE KNDVI TS PER LAND COVER TYPE
         # ======================================================
-        df_mean_kndvi_ts = ea.aggregate_kndvi_timeseries(kndvi_array, vegetation, event_mask, method='mean')
+        df_mean_kndvi_ts = ea.aggregate_da_to_timeseries(kndvi_array, vegetation, event_mask, method='mean')
 
         # ======================================================
         # 2.3 CALCULATE EVENT STATISTICS
         # ======================================================
         # Calculate event statistics based on kNDVI (target variables)
-        df_stats_deseasonalized = ea.calculate_event_stats(df_mean_kndvi_ts, start_time_value, end_time_value)
+        df_stats_deseasonalized = ea.calculate_event_stats(df_mean_kndvi_ts, start_time, end_time)
 
         # ======================================================
         # 2.4 PREPARE PREDICTORS
         # ======================================================
-        # Load data arrays
-        t2m = ds_esdc['air_temperature_2m']
-        t2mmin = ds_esdc['min_air_temperature_2m']
-        t2mmax = ds_esdc['max_air_temperature_2m']
-        prec = ds_esdc['precipitation_era5']
-        soil_moist = ds_esdc['root_moisture']
-        evap = ds_esdc['evaporation']
-        evap_pot = ds_esdc['potential_evaporation']
 
-        # Create event arrays
-        t2m_array = es.create_event_dataarray(d_array = t2m, event_mask = event_mask,  start_date=start_time_value, end_date=end_time_value)
-        t2mmin_array = es.create_event_dataarray(d_array = t2mmin, event_mask = event_mask, start_date=start_time_value, end_date=end_time_value)
-        t2mmax_array = es.create_event_dataarray(d_array = t2mmax, event_mask = event_mask, start_date=start_time_value, end_date=end_time_value)
-        prec_array = es.create_event_dataarray(d_array = prec, event_mask = event_mask,start_date=start_time_value, end_date=end_time_value)
-        soil_moist_array = es.create_event_dataarray(d_array = soil_moist, event_mask = event_mask, start_date=start_time_value, end_date=end_time_value)
-        evap_array = es.create_event_dataarray(d_array = evap, event_mask = event_mask, start_date=start_time_value, end_date=end_time_value)
-        evap_pot_array = es.create_event_dataarray(d_array = evap_pot, event_mask = event_mask, start_date=start_time_value, end_date=end_time_value)
-        event_count = ea.calculate_n_days_affected(start_time_value, end_time_value, event_mask, event_label=label, ds_label=ds_chd_labels) # Already tailored to specific event
+        # Create predictor event arrays
+        t2m_array = es.create_event_dataarray(d_array = t2m, event_mask = event_mask, start_date=start_time, end_date=end_time)
+        t2mmin_array = es.create_event_dataarray(d_array = t2mmin, event_mask = event_mask, start_date=start_time, end_date=end_time)
+        t2mmax_array = es.create_event_dataarray(d_array = t2mmax, event_mask = event_mask, start_date=start_time, end_date=end_time)
 
-        # Create climate event arrays for previous year
-        t2m_array_prev = es.create_event_dataarray(d_array = t2m, event_mask = event_mask,  start_date=start_time_value_prev, end_date=end_time_value_prev)
-        t2mmin_array_prev = es.create_event_dataarray(d_array = t2mmin, event_mask = event_mask, start_date=start_time_value_prev, end_date=end_time_value_prev)
-        t2mmax_array_prev = es.create_event_dataarray(d_array = t2mmax, event_mask = event_mask, start_date=start_time_value_prev, end_date=end_time_value_prev)
-        prec_array_prev = es.create_event_dataarray(d_array = prec, event_mask = event_mask,start_date=start_time_value_prev, end_date=end_time_value_prev)
-        soil_moist_array_prev = es.create_event_dataarray(d_array = soil_moist, event_mask = event_mask, start_date=start_time_value_prev, end_date=end_time_value_prev)
-        evap_array_prev = es.create_event_dataarray(d_array = evap, event_mask = event_mask, start_date=start_time_value_prev, end_date=end_time_value_prev)
-        evap_pot_array_prev = es.create_event_dataarray(d_array = evap_pot, event_mask = event_mask, start_date=start_time_value_prev, end_date=end_time_value_prev)
+        # Cosine weighted versions
+        t2m_w_array = es.create_event_dataarray(d_array = t2m_w, event_mask = event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer)
+        t2mmin_w_array = es.create_event_dataarray(d_array = t2mmin_w, event_mask = event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer)
+        t2mmax_w_array = es.create_event_dataarray(d_array = t2mmax_w, event_mask = event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer)
+        prec_w_array = es.create_event_dataarray(d_array = prec_w, event_mask = event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer)
+        soil_moist_w_array = es.create_event_dataarray(d_array = soil_moist_w, event_mask = event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer)
+        evap_w_array = es.create_event_dataarray(d_array = evap_w, event_mask = event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer)
+        evap_pot_w_array = es.create_event_dataarray(d_array = evap_pot_w, event_mask = event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer)
+
+        # Create climate event arrays for previous year (#TODO: not period of year!)
+        t2m_array_prev = es.create_event_dataarray(d_array = t2m, event_mask = event_mask,  start_date=start_time_prev, end_date=end_time_prev)
+        t2mmin_array_prev = es.create_event_dataarray(d_array = t2mmin, event_mask = event_mask, start_date=start_time_prev, end_date=end_time_prev)
+        t2mmax_array_prev = es.create_event_dataarray(d_array = t2mmax, event_mask = event_mask, start_date=start_time_prev, end_date=end_time_prev)
+        prec_array_prev = es.create_event_dataarray(d_array = prec_w, event_mask = event_mask,start_date=start_time_prev, end_date=end_time_prev)
+        soil_moist_array_prev = es.create_event_dataarray(d_array = soil_moist_w, event_mask = event_mask, start_date=start_time_prev, end_date=end_time_prev)
+        evap_array_prev = es.create_event_dataarray(d_array = evap_w, event_mask = event_mask, start_date=start_time_prev, end_date=end_time_prev)
+        evap_pot_array_prev = es.create_event_dataarray(d_array = evap_pot_w, event_mask = event_mask, start_date=start_time_prev, end_date=end_time_prev)
+
+        # Number of days affected
+        event_count = ea.calculate_n_days_affected(start_time, end_time, event_mask, event_label=label, ds_label=ds_chd_labels) # Already tailored to specific event
+
+        ## Predictor anomalies
+        # Aggregate by vegetation type
+        df_mean_t2m_ts = ea.aggregate_da_to_timeseries(t2m_w_array, vegetation, event_mask, method='mean')
+        df_mean_t2mmin_ts = ea.aggregate_da_to_timeseries(t2mmin_w_array, vegetation, event_mask, method='mean')
+        df_mean_t2mmax_ts = ea.aggregate_da_to_timeseries(t2mmax_w_array, vegetation, event_mask, method='mean')
+        df_mean_prec_ts = ea.aggregate_da_to_timeseries(prec_w_array, vegetation, event_mask, method='mean')
+        df_mean_soil_moist_ts = ea.aggregate_da_to_timeseries(soil_moist_w_array, vegetation, event_mask, method='mean')
+        df_mean_evap_ts = ea.aggregate_da_to_timeseries(evap_w_array, vegetation, event_mask, method='mean')
+        df_mean_evap_pot_ts = ea.aggregate_da_to_timeseries(evap_pot_w_array, vegetation, event_mask, method='mean')
+
+        # Get residuals
+        df_mean_t2m_resid = ea.ts_decomposition(df_mean_t2m_ts)
+        df_mean_t2mmin_resid = ea.ts_decomposition(df_mean_t2mmin_ts)
+        df_mean_t2mmax_resid = ea.ts_decomposition(df_mean_t2mmax_ts)
+        df_mean_prec_resid = ea.ts_decomposition(df_mean_prec_ts)
+        df_mean_soil_moist_resid = ea.ts_decomposition(df_mean_soil_moist_ts)
+        df_mean_evap_resid = ea.ts_decomposition(df_mean_evap_ts)
+        df_mean_evap_pot_resid = ea.ts_decomposition(df_mean_evap_pot_ts)
+
+        # Compute (sum up residuals over event period + buffer)
+        t2m_anomalies = ea.calculate_predictor_anomaly(df_mean_t2m_resid, start_time, end_time)
+        t2mmin_anomalies = ea.calculate_predictor_anomaly(df_mean_t2mmin_resid, start_time, end_time)
+        t2mmax_anomalies = ea.calculate_predictor_anomaly(df_mean_t2mmax_resid, start_time, end_time)
+        prec_anomalies = ea.calculate_predictor_anomaly(df_mean_prec_resid, start_time, end_time)
+        soil_moist_anomalies = ea.calculate_predictor_anomaly(df_mean_soil_moist_resid, start_time, end_time)
+        evap_anomalies = ea.calculate_predictor_anomaly(df_mean_evap_resid, start_time, end_time)
+        evap_pot_anomalies = ea.calculate_predictor_anomaly(df_mean_evap_pot_resid, start_time, end_time)
 
         # ======================================================
-        # 2.5 PUT ALL DATA IN ONE DATAFRAME
+        # 2.5 ADD FLAG IF 2 YEARS AROUND THE EVENT WAS ANOTHER EVENT
+        # ======================================================
+        other_events = es.check_for_other_events(start_date=start_time,
+                                                 end_date=end_time,
+                                                 event_mask=event_mask,
+                                                 labelcube=ds_chd_labels,
+                                                 label=label,
+                                                 events=events)
+
+        # ======================================================
+        # 2.6 PUT ALL DATA IN ONE DATAFRAME
         # ======================================================
         event_count_agg = ea.aggregate_by_vegetation(vegetation=vegetation, 
                                                                         event_mask=event_mask, 
@@ -231,19 +280,19 @@ if __name__ == "__main__":
                                                         method='mean')
         prec_agg = ea.aggregate_by_vegetation(vegetation=vegetation,
                                                         event_mask=event_mask,
-                                                        data_array=prec_array,
+                                                        data_array=prec_w_array,
                                                         method='sum')
         soil_moist_agg = ea.aggregate_by_vegetation(vegetation=vegetation,
                                                         event_mask=event_mask,
-                                                        data_array=soil_moist_array,
+                                                        data_array=soil_moist_w_array,
                                                         method='sum')
         evap_agg = ea.aggregate_by_vegetation(vegetation=vegetation,
                                                         event_mask=event_mask,
-                                                        data_array=evap_array,
+                                                        data_array=evap_w_array,
                                                         method='sum')
         evap_pot_agg = ea.aggregate_by_vegetation(vegetation=vegetation,
                                                         event_mask=event_mask,
-                                                        data_array=evap_pot_array,
+                                                        data_array=evap_pot_w_array,
                                                         method='sum')
         
         t2m_agg_prev = ea.aggregate_by_vegetation(vegetation=vegetation,
@@ -281,6 +330,15 @@ if __name__ == "__main__":
                                                         data_array=evap_pot_array_prev,
                                                         method='sum')
         
+        # Check if any of the aggregations is empty
+        all_aggs = [
+            event_count_agg, t2m_agg, t2mmin_agg, t2mmax_agg, prec_agg, soil_moist_agg, evap_agg, evap_pot_agg,
+            t2m_agg_prev, t2mmin_agg_prev, t2mmax_agg_prev, prec_agg_prev, soil_moist_agg_prev, evap_agg
+        ]
+
+        if any(agg.empty for agg in all_aggs):
+            print(f"Skipping event {label} — one or more aggregations empty")
+            continue
 
         # Put series together as dataframe
         df = pd.DataFrame({'n_days': event_count_agg,
@@ -297,7 +355,15 @@ if __name__ == "__main__":
                                 'prec_prev': prec_agg_prev,
                                 'soil_moist_prev': soil_moist_agg_prev,
                                 'evap_prev': evap_agg_prev,
-                                'evap_pot_prev': evap_pot_agg_prev54
+                                'evap_pot_prev': evap_pot_agg_prev,
+                                't2m_anomaly': t2m_anomalies,
+                                't2min_anomaly': t2mmin_anomalies,
+                                't2mmax_anomaly': t2mmax_anomalies,
+                                'prec_anomaly': prec_anomalies,
+                                'soil_moist_anomalies': soil_moist_anomalies,
+                                'evap_anomaly': evap_anomalies,
+                                'evap_pot_anomalies': evap_pot_anomalies,
+                                'other_events': other_events
                                 })
 
         # Add event stats to dataframe
@@ -319,4 +385,4 @@ if __name__ == "__main__":
     df_all = pd.concat(df_list)
 
     # Save df to file
-    #df_all.to_csv('data/results/analysis_execution.csv')
+    df_all.to_csv(OUTPUT_PATH)
