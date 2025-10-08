@@ -182,7 +182,7 @@ def calculate_event_stats(df_time_series, start_time_value, end_time_value):
 
     # Calculate anomaly strength
     df_stats.loc['kndvi_anomaly_strength'] = df_residuals[start_time_value:extended_end_time].sum(axis=0)
-    df_stats.loc['kndvi_anomaly_strength_day'] = df_residuals[start_time_value:extended_end_time].sum(axis=0) / len(df_residuals[start_time_value:extended_end_time]) # Divided by number of data points
+    df_stats.loc['kndvi_anomaly_strength_average'] = df_residuals[start_time_value:extended_end_time].sum(axis=0) / len(df_residuals[start_time_value:extended_end_time]) # Divided by number of data points
 
     return df_stats
 
@@ -226,7 +226,7 @@ def calculate_n_days_affected(start_date, end_date, event_mask, event_label, ds_
 
     return event_count_da
 
-def calculate_predictor_anomaly(df_ts, start_date, end_date, normalized=True):
+def calculate_predictor_anomaly(df_ts, start_date, end_date, averaged=False):
 
     """
     Calculates the anomaly for the predictor (e.g. precipitation) for a given event.
@@ -235,22 +235,27 @@ def calculate_predictor_anomaly(df_ts, start_date, end_date, normalized=True):
     - df_ts (pandas.DataFrame): A dataframe containing the residual component of a time series of the predictor.
     - start_date: Date of event beginning.
     - end_date: Date of event end.
+    - averaged (bool): If True, the anomaly is the average deviation during event period + buffer.
 
     Returns:
     - anomalies (pandas.Series): A series containing the anomaly for the predictor per vegetation class.
     """
 
-    # Initialize empty dataframe
-    df = pd.DataFrame
+    # Initialize  dates
     event_duration = end_date - start_date
     buffer_duration = event_duration * 0.5
     extended_start_time = start_date - buffer_duration
 
-    if normalized:
-        anomalies = df_ts[extended_start_time:end_date].sum(axis=0)
+    df_resid = ts_decomposition(df_ts)
+
+    if averaged:
+        anomalies = df_resid[extended_start_time:end_date].sum(axis=0) / len(df_ts[extended_start_time:end_date]) # Divided by number of data points
     else:    
-        anomalies = df_ts[extended_start_time:end_date].sum(axis=0) / len(df_ts[extended_start_time:end_date]) # Divided by number of data points
+        anomalies = df_resid[extended_start_time:end_date].sum(axis=0) 
     
+    # Ensure right index name
+    anomalies.index.name = "veg_class"
+
     return anomalies
 
 
@@ -342,6 +347,9 @@ def aggregate_by_vegetation(vegetation, event_mask, data_array, method: Literal[
             df = df.groupby('veg_class')['value'].sum()
         else:
             raise ValueError("Invalid method. Choose 'mean' or 'sum'.")
+    
+    # Ensure index name is veg_class
+    df.index.name = "veg_class"
 
     return df
 
