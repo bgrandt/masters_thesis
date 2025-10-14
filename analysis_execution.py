@@ -51,7 +51,7 @@ PATH_VEG = 'data/GLDASp5_domveg_NOAH3.6_025d.nc4'
 PATH_TRANSLATION = "data/GLDA_veg_legend.csv"
 THRESHOLD_DURATION_DAYS = 18 # May have to be adapted because not enough events are included
 ESDC_SUBSET_PATH = 'data/esdc_subset.zarr' # Can be path to local directory or url to cloud storage
-OUTPUT_PATH = 'data/output/09_29.csv'
+OUTPUT_PATH = 'data/output/10_13.csv'
 
 if __name__ == "__main__":
 
