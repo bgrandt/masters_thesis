@@ -132,6 +132,146 @@ def plot_kndvi_time_series(event_array, lat, lon, event_label, event_table):
     plt.show()
 
 
+def plot_kndvi_time_series_complex(event_array, lat, lon, event_label, event_table):
+    """
+    Plots the KNDVI time series for a given coordinate.
+
+    Shows:
+    - Vdist: minimum KNDVI between start_date and extended_end_date (red cross)
+    - Vpre: constant average KNDVI before start_date (orange line)
+    - Vpost: constant average KNDVI after extended_end_date (red line)
+    """
+
+    # --- 1. Extract event times ---
+    event_row = event_table[event_table['label'] == event_label].iloc[0]
+    start_date = np.datetime64(event_row['start_time'])
+    end_date = np.datetime64(event_row['end_time'])
+    event_duration = (end_date - start_date) / 2
+    extended_end_date = end_date + event_duration
+
+    # --- 2. Extract time series for this pixel ---
+    ts = event_array.sel(lat=lat, lon=lon, method="nearest").drop_duplicates(dim="time").load()
+    times = ts.time.values
+    values = ts.values
+
+    # --- 3. Compute masks ---
+    mask_event = (times >= start_date) & (times <= extended_end_date)
+    mask_pre = times < start_date
+    mask_post = times > extended_end_date
+
+    # --- 4. Compute metrics ---
+    vdist = np.nanmin(values[mask_event]) if np.any(mask_event) else np.nan
+    vpre = np.nanmean(values[mask_pre]) if np.any(mask_pre) else np.nan
+    vpost = np.nanmean(values[mask_post]) if np.any(mask_post) else np.nan
+
+    # Find the *actual time* of vdist
+    if not np.isnan(vdist) and np.any(mask_event):
+        # Get subset times/values within event
+        event_times = times[mask_event]
+        event_values = values[mask_event]
+        vdist_idx = np.nanargmin(event_values)
+        vdist_time = event_times[vdist_idx]
+    else:
+        vdist_time = None
+
+    # --- 5. Plot ---
+    plt.figure(figsize=(10, 6))
+
+    # Full time series
+    plt.plot(times, values, color='green', label='KNDVI')
+
+    # Event window
+    plt.axvspan(start_date, extended_end_date, color='cornsilk', alpha=0.7, label='Extended event window')
+
+    # Constant lines
+    if not np.isnan(vpre):
+        plt.hlines(vpre, xmin=times.min(), xmax=start_date, color='orange', label=f'Vpre = {vpre:.3f}')
+    if not np.isnan(vpost):
+        plt.hlines(vpost, xmin=extended_end_date, xmax=times.max(), color='red', label=f'Vpost = {vpost:.3f}')
+
+    # Vdist marker — red cross
+    if vdist_time is not None:
+        plt.scatter(vdist_time, vdist, color='red', marker='x', s=100, zorder=5, label=f'Vdist = {vdist:.3f}')
+
+    # Aesthetics
+    plt.title(f'KNDVI Time Series (lat={lat}, lon={lon}) - Event {event_label}')
+    plt.xlabel('Time')
+    plt.ylabel('KNDVI')
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+def plot_aggregated_kndvi_time_series_df(ts_df, land_cover_col, event_label, event_table):
+    """
+    Plots a KNDVI time series from a DataFrame for a given land cover type. Uses already aggregated time series, 
+    i.e. output of aggregate_da_to_ts.
+
+    Shows:
+      - Vdist: minimum KNDVI between start_date and extended_end_date (red cross)
+      - Vpre: constant average KNDVI before start_date (orange line)
+      - Vpost: constant average KNDVI after extended_end_date (red line)
+
+    Parameters:
+      ts_df (pd.DataFrame): time series DataFrame
+        - index: datetime/time
+        - columns: vegetation classes (e.g., land cover types)
+      land_cover_col (str): column name for the land cover type to plot
+      event_label (int/str): event label to extract from event_table
+      event_table (pd.DataFrame): contains 'label', 'start_time', 'end_time'
+    """
+
+    # --- 1. Extract event times ---
+    event_row = event_table[event_table['label'] == event_label].iloc[0]
+    start_date = pd.to_datetime(event_row['start_time'])
+    end_date = pd.to_datetime(event_row['end_time'])
+    event_duration = (end_date - start_date) / 2
+    extended_end_date = end_date + event_duration
+
+    # --- 2. Extract the series for the land cover type ---
+    ts_series = ts_df[land_cover_col]
+    times = ts_series.index
+    values = ts_series.values
+
+    # --- 3. Compute masks ---
+    mask_event = (times >= start_date) & (times <= extended_end_date)
+    mask_pre = times < start_date
+    mask_post = times > extended_end_date
+
+    # --- 4. Compute metrics ---
+    vdist = np.nanmin(values[mask_event]) if np.any(mask_event) else np.nan
+    vpre = np.nanmean(values[mask_pre]) if np.any(mask_pre) else np.nan
+    vpost = np.nanmean(values[mask_post]) if np.any(mask_post) else np.nan
+
+    # Find the actual time of vdist
+    vdist_time = times[mask_event][np.nanargmin(values[mask_event])] if np.any(mask_event) else None
+
+    # --- 5. Plot ---
+    plt.figure(figsize=(10, 6))
+    plt.plot(times, values, color='green', label=f'{land_cover_col} KNDVI')
+
+    # Shaded event window
+    plt.axvspan(start_date, extended_end_date, color='cornsilk', alpha=0.7, label='Extended event window')
+
+    # Constant lines
+    if not np.isnan(vpre):
+        plt.hlines(vpre, xmin=times.min(), xmax=start_date, color='orange', label=f'Vpre = {vpre:.3f}')
+    if not np.isnan(vpost):
+        plt.hlines(vpost, xmin=extended_end_date, xmax=times.max(), color='red', label=f'Vpost = {vpost:.3f}')
+
+    # Vdist marker
+    if vdist_time is not None:
+        plt.scatter(vdist_time, vdist, color='red', marker='x', s=100, zorder=5, label=f'Vdist = {vdist:.3f}')
+
+    # Aesthetics
+    plt.title(f'KNDVI Time Series - Event {event_label} - {land_cover_col}')
+    plt.xlabel('Time')
+    plt.ylabel('KNDVI')
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
 
 def plot_kndvi_time_series_with_baseline(event_array, lat, lon, event_label, event_table, full_kndvi_data):
     """

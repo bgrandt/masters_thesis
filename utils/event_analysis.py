@@ -174,7 +174,8 @@ def calculate_event_stats(df_time_series, start_time_value, end_time_value):
     # Calculate resilience, resistance and recovery
     df_stats.loc['resilience'] = df_stats.loc['vpost'] / df_stats.loc['vpre']
     df_stats.loc['resistance'] = df_stats.loc['vdist'] / df_stats.loc['vpre']
-    df_stats.loc['recovery'] = df_stats.loc['vpost'] - df_stats.loc['vdist'] / df_stats.loc['vpre'] - df_stats.loc['vdist']
+    df_stats.loc['recovery_dep'] = df_stats.loc['vpost'] - df_stats.loc['vdist'] / df_stats.loc['vpre'] - df_stats.loc['vdist']
+    df_stats.loc['recovery'] = df_stats.loc['vpost'] / df_stats.loc['vdist']
 
     # Calculate duration until maximum impact
     date_vdist = df_time_series[start_time_value:extended_end_time].idxmin() # Date of maximum impact
