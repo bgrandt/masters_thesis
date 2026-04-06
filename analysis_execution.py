@@ -51,14 +51,14 @@ PATH_VEG = 'data/GLDASp5_domveg_NOAH3.6_025d.nc4'
 PATH_TRANSLATION = "data/GLDA_veg_legend.csv"
 THRESHOLD_DURATION_DAYS = 18 # May have to be adapted because not enough events are included
 ESDC_SUBSET_PATH = 'data/esdc_subset.zarr' # Can be path to local directory or url to cloud storage
-OUTPUT_PATH = 'data/output/10_14.csv'
+OUTPUT_PATH = 'data/output/26_03_11_on_residuals.csv'
 
 if __name__ == "__main__":
 
     # ======================================================
     # 1. LOAD DATA
     # ======================================================
-    buffer = 2 * 365 # Days for the temporal buffer around each event
+    buffer = 2 * 365 # Days for the temporal buffer around each event for the kNDVI cube AND predictor anomaly
 
     ## kNDVI array and climatic predictors
     # Import ESDL dataset
@@ -173,6 +173,10 @@ if __name__ == "__main__":
             print(f"Skipping event {label} — empty mask")
             continue
 
+        # ======================================================
+        # 2.2 PREPARE RESPONSE VARIABLE KNDVI
+        # ======================================================
+
         # Create event array
         kndvi_array = es.create_event_dataarray(kndvi_w, event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer)
 
@@ -182,22 +186,23 @@ if __name__ == "__main__":
             continue
 
         # ======================================================
-        # 2.2 AGGREGATE KNDVI TS PER LAND COVER TYPE
+        # 2.3 AGGREGATE KNDVI TS PER LAND COVER TYPE
         # ======================================================
         df_mean_kndvi_ts = ea.aggregate_da_to_timeseries(kndvi_array, vegetation, event_mask, method='mean')
 
         # ======================================================
-        # 2.3 CALCULATE EVENT STATISTICS (KNDVI RESPONSE METRICS)
+        # 2.4 CALCULATE EVENT STATISTICS (KNDVI RESPONSE METRICS)
         # ======================================================
         # Calculate event statistics based on kNDVI (target variables)
-        df_kndvi_stats = ea.calculate_event_stats(df_mean_kndvi_ts, start_time, end_time)
+        #df_kndvi_stats = ea.calculate_event_stats(df_mean_kndvi_ts, start_time, end_time)
+        df_kndvi_stats = ea.calculate_event_stats_on_residuals(df_mean_kndvi_ts, start_time, end_time)
 
         # ======================================================
-        # 2.4 PREPARE PREDICTORS
+        # 2.5 PREPARE PREDICTORS
         # ======================================================
 
-        # Create arrays for anomaly computation an aggregation
-        t2m_w_array = es.create_event_dataarray(d_array = t2m_w, event_mask = event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer)
+        # Create arrays for anomaly computation AND aggregation
+        t2m_w_array = es.create_event_dataarray(d_array = t2m_w, event_mask = event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer) 
         t2mmin_w_array = es.create_event_dataarray(d_array = t2mmin_w, event_mask = event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer)
         t2mmax_w_array = es.create_event_dataarray(d_array = t2mmax_w, event_mask = event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer)
         prec_w_array = es.create_event_dataarray(d_array = prec_w, event_mask = event_mask, start_date=start_time, end_date=end_time, time_buffer=buffer)
@@ -217,7 +222,8 @@ if __name__ == "__main__":
         # Number of days affected
         event_count = ea.calculate_n_days_affected(start_time, end_time, event_mask, event_label=label, ds_label=ds_chd_labels) # Already tailored to specific event
 
-        ## Predictor anomalies
+
+        ### Predictor anomalies
         df_mean_t2m_ts = ea.aggregate_da_to_timeseries(t2m_w_array, vegetation, event_mask, method='mean')
         df_mean_t2mmin_ts = ea.aggregate_da_to_timeseries(t2mmin_w_array, vegetation, event_mask, method='mean')
         df_mean_t2mmax_ts = ea.aggregate_da_to_timeseries(t2mmax_w_array, vegetation, event_mask, method='mean')
@@ -225,7 +231,6 @@ if __name__ == "__main__":
         df_mean_soil_moist_ts = ea.aggregate_da_to_timeseries(soil_moist_w_array, vegetation, event_mask, method='mean')
         df_mean_evap_ts = ea.aggregate_da_to_timeseries(evap_w_array, vegetation, event_mask, method='mean')
         df_mean_evap_pot_ts = ea.aggregate_da_to_timeseries(evap_pot_w_array, vegetation, event_mask, method='mean')
-
 
         # Compute (sum up residuals over event period + buffer)
         t2m_anomalies = ea.calculate_predictor_anomaly(df_mean_t2m_ts, start_time, end_time)
@@ -237,7 +242,7 @@ if __name__ == "__main__":
         evap_pot_anomalies = ea.calculate_predictor_anomaly(df_mean_evap_pot_ts, start_time, end_time)
 
         # ======================================================
-        # 2.5 ADD FLAG IF 2 YEARS AROUND THE EVENT WAS ANOTHER EVENT
+        # 2.6 ADD FLAG IF 2 YEARS AROUND THE EVENT WAS ANOTHER EVENT
         # ======================================================
         other_events = es.check_for_other_events(start_date=start_time,
                                                  end_date=end_time,
@@ -247,7 +252,7 @@ if __name__ == "__main__":
                                                  events=events)
 
         # ======================================================
-        # 2.6 PUT ALL DATA IN ONE DATAFRAME
+        # 2.7 PUT ALL DATA IN ONE DATAFRAME
         # ======================================================
 
         # Aggregations
@@ -258,31 +263,52 @@ if __name__ == "__main__":
         t2m_agg = ea.aggregate_by_vegetation(vegetation=vegetation,
                                                         event_mask=event_mask,
                                                         data_array=t2m_w_array,
-                                                        method='mean')
+                                                        method='mean',
+                                                        subset_to_event_dates=True,
+                                                        start_time=start_time,
+                                                        end_time=end_time)
         t2mmin_agg = ea.aggregate_by_vegetation(vegetation=vegetation,
                                                         event_mask=event_mask,
                                                         data_array=t2mmin_w_array,
-                                                        method='mean')
+                                                        method='mean',
+                                                        subset_to_event_dates=True,
+                                                        start_time=start_time,
+                                                        end_time=end_time)
         t2mmax_agg = ea.aggregate_by_vegetation(vegetation=vegetation,
                                                         event_mask=event_mask,
                                                         data_array=t2mmax_w_array,
-                                                        method='mean')
+                                                        method='mean',
+                                                        subset_to_event_dates=True,
+                                                        start_time=start_time,
+                                                        end_time=end_time)
         prec_agg = ea.aggregate_by_vegetation(vegetation=vegetation,
                                                         event_mask=event_mask,
                                                         data_array=prec_w_array,
-                                                        method='mean')
+                                                        method='mean',
+                                                        subset_to_event_dates=True,
+                                                        start_time=start_time,
+                                                        end_time=end_time)
         soil_moist_agg = ea.aggregate_by_vegetation(vegetation=vegetation,
                                                         event_mask=event_mask,
                                                         data_array=soil_moist_w_array,
-                                                        method='mean')
+                                                        method='mean',
+                                                        subset_to_event_dates=True,
+                                                        start_time=start_time,
+                                                        end_time=end_time)
         evap_agg = ea.aggregate_by_vegetation(vegetation=vegetation,
                                                         event_mask=event_mask,
                                                         data_array=evap_w_array,
-                                                        method='mean')
+                                                        method='mean',
+                                                        subset_to_event_dates=True,
+                                                        start_time=start_time,
+                                                        end_time=end_time)
         evap_pot_agg = ea.aggregate_by_vegetation(vegetation=vegetation,
                                                         event_mask=event_mask,
                                                         data_array=evap_pot_w_array,
-                                                        method='mean')
+                                                        method='mean',
+                                                        subset_to_event_dates=True,
+                                                        start_time=start_time,
+                                                        end_time=end_time)
         
         # Aggregations from previous year's conditions
         t2m_agg_prev = ea.aggregate_by_vegetation(vegetation=vegetation,
@@ -350,9 +376,9 @@ if __name__ == "__main__":
                                 't2min_anomaly': t2mmin_anomalies,
                                 't2mmax_anomaly': t2mmax_anomalies,
                                 'prec_anomaly': prec_anomalies,
-                                'soil_moist_anomalies': soil_moist_anomalies,
+                                'soil_moist_anomaly': soil_moist_anomalies,
                                 'evap_anomaly': evap_anomalies,
-                                'evap_pot_anomalies': evap_pot_anomalies,
+                                'evap_pot_anomaly': evap_pot_anomalies,
                                 'other_events': other_events
                                 })
 

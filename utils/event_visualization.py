@@ -389,3 +389,110 @@ def plot_aggregated_ts(df_time_series,
     plt.grid(True)
     plt.tight_layout()
     plt.show()
+
+
+def plot_all_classes_kndvi_subplots(ts_df, event_label, event_table):
+    """
+    Plots KNDVI time series for ALL vegetation classes in separate subplots 
+    within one figure, sharing the time (x) axis. This is for visualization in the document only.
+
+    Shows:
+      - Vdist: minimum KNDVI between start_date and extended_end_date (red cross)
+      - Vpre: constant average KNDVI before start_date (orange line)
+      - Vpost: constant average KNDVI after extended_end_date (red line)
+
+    Parameters:
+      ts_df (pd.DataFrame): aggregated time series DataFrame
+        - index: datetime/time
+        - columns: vegetation classes (e.g., land cover types)
+      event_label (int/str): event label to extract from event_table
+      event_table (pd.DataFrame): contains 'label', 'start_time', 'end_time'
+    """
+
+    ## Extract event times
+    try:
+        event_row = event_table[event_table['label'] == event_label].iloc[0]
+    except IndexError:
+        print(f"Error: Event label '{event_label}' not found in event_table.")
+        return
+
+    start_date = pd.to_datetime(event_row['start_time'])
+    end_date = pd.to_datetime(event_row['end_time'])
+    event_duration = (end_date - start_date) / 2
+    extended_end_date = end_date + event_duration
+    
+    # Get the list of all vegetation classes to plot
+    land_cover_cols = ts_df.columns
+    num_plots = len(land_cover_cols)
+
+    if num_plots == 0:
+        print("Error: The input DataFrame 'ts_df' has no columns to plot.")
+        return
+
+    ## Setup the figure and subplots 
+    # Determine figure size
+    fig, axes = plt.subplots(num_plots, 1, figsize=(12, 3 * num_plots), sharex=True)
+    
+    if num_plots == 1:
+        axes = [axes]
+
+    ## Iterate and plot each vegetation class
+    for i, land_cover_col in enumerate(land_cover_cols):
+        ax = axes[i]
+        
+        # Extract the series
+        ts_series = ts_df[land_cover_col]
+        times = ts_series.index
+        values = ts_series.values
+
+        # Compute masks
+        mask_event = (times >= start_date) & (times <= extended_end_date)
+        mask_pre = times < start_date
+        mask_post = times > extended_end_date
+
+        # Compute metrics
+        vdist = np.nanmin(values[mask_event]) if np.any(mask_event) else np.nan
+        vpre = np.nanmean(values[mask_pre]) if np.any(mask_pre) else np.nan
+        vpost = np.nanmean(values[mask_post]) if np.any(mask_post) else np.nan
+
+        # Find the actual time of vdist
+        vdist_time = times[mask_event][np.nanargmin(values[mask_event])] if np.any(mask_event) and not np.isnan(vdist) else None
+
+        # Plotting on the current subplot
+        ax.plot(times, values, color='green', label='KNDVI')
+
+        # Shaded event window
+        ax.axvspan(start_date, extended_end_date, color='cornsilk', alpha=0.7, label='Extended event window')
+
+        # Constant lines
+        if not np.isnan(vpre):
+            ax.hlines(vpre, xmin=times.min(), xmax=start_date, color='orange', linestyle='--', label=r'$V_{\text{pre}}$')
+        if not np.isnan(vpost):
+            ax.hlines(vpost, xmin=extended_end_date, xmax=times.max(), color='red', linestyle='--', label=r'$V_{\text{post}}$')
+
+        # Vdist marker
+        if vdist_time is not None:
+            ax.scatter(vdist_time, vdist, color='red', marker='x', s=100, zorder=5, label=r'$V_{\text{dist}}$')
+
+        # Aesthetics and Labels
+        ax.set_title(land_cover_col, fontsize=10, loc='right') # Title for the subplot
+        ax.set_ylabel('KNDVI')
+        ax.grid(alpha=0.3)
+        
+        # Legend only on the top subplot for simplicity
+        if i == 0:
+            ax.legend(loc='lower left', fontsize=8)
+        
+        # Remove x-axis ticks for all but the bottom plot
+        if i < num_plots - 1:
+            ax.tick_params(labelbottom=False)
+
+    ## Final Figure Aesthetics
+    fig.suptitle(f'KNDVI Time Series for All Vegetation Classes (Event {event_label})', fontsize=14, y=1.02)
+   
+    axes[-1].set_xlabel('Time') 
+    
+    # Adjust spacing between subplots 
+    plt.subplots_adjust(hspace=0.05) 
+    plt.tight_layout(rect=[0, 0, 1, 1.0])
+    plt.show()
