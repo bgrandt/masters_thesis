@@ -104,7 +104,13 @@ data/GLDASp5_landmask_025d.nc4
 
 The complete analysis consists of several stages.
 
-WORKFLOW IMAGE
+<p align="center">
+  <img src="figures/1_minicube_creation.png" alt="Creation of minicubes used for modeling" width="800">
+</p>
+
+<p align="center">
+  <em>Creation of minicubes used for modeling.</em>
+</p>
 
 ---
 
