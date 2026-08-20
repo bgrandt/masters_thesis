@@ -66,7 +66,7 @@ def calculate_similarity(decomposition_a, decomposition_b, start_date, end_date)
 
     #### Objective function score ####
     # Calculate lower and upper bounds for RMSE normalization
-    combined_trend = np.concatenate([trend_a, trend_b]) # Min and max of combined trend and seasonal components is required
+    combined_trend = np.concatenate([trend_a, trend_b])
     min_trend = combined_trend.min()
     max_trend = combined_trend.max()
 
@@ -75,7 +75,7 @@ def calculate_similarity(decomposition_a, decomposition_b, start_date, end_date)
     max_seasonal = combined_seasonal.max()
 
     # Compute scores
-    trend_sim_score = np.sqrt(mean_squared_error(trend_a, trend_b)) / (max_trend - min_trend) # RMSE penalizes large deviations more
+    trend_sim_score = np.sqrt(mean_squared_error(trend_a, trend_b)) / (max_trend - min_trend)
     seasonal_sim_score = np.sqrt(mean_squared_error(seasonal_a, seasonal_b)) / (max_seasonal - min_seasonal)
     anomaly_strength_score = calculate_anomaly_score(residuals_a, residuals_b, start_date, end_date)
     ljung_box_score = acorr_ljungbox(residuals_a, lags=[10], return_df=True)['lb_pvalue'].iloc[0] 
