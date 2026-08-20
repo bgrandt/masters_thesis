@@ -53,49 +53,6 @@ def get_data_pixel_coordinates(event_dataarray):
 
     return coordinates
 
-'''def get_data_pixel_coordinates(event_dataarray):
-    """
-    Extracts the coordinates of the pixels in the event dataset that actually have data.
-    
-    Parameters:
-    - event_dataarray (xr.DataArray): The DataArray containing the event data.
-    
-    Returns:
-    - coordinates (pandas.DataFrame): A DataFrame with coordinates of pixels that have data.
-    """
-
-    if not isinstance(event_dataarray, xr.DataArray):
-        raise TypeError("Input must be an xarray.DataArray")
-
-    # Convert binary 0/1 array to boolean
-    if set(np.unique(event_dataarray.values)).issubset({0, 1}):
-        event_dataarray = event_dataarray.astype(bool)
-
-    dims = event_dataarray.dims
-
-    # Create mask depending on dimensionality
-    if len(dims) == 3:
-        mask = event_dataarray.any(dim=dims[0])
-    elif len(dims) == 2:
-        mask = event_dataarray
-    else:
-        raise ValueError(f"Expected 2D or 3D array, got {len(dims)}D.")
-
-    # Ensure boolean mask
-    mask = mask.astype(bool).compute()
-
-    # Stack dimensions into a single index
-    stacked = mask.stack(z=mask.dims)
-
-    # Keep only True values (valid pixels)
-    valid_pixels = stacked[stacked]
-
-    # Convert to DataFrame directly (includes coordinates)
-    coords_df = valid_pixels.to_dataframe(name='mask').reset_index()
-
-    # Drop helper columns
-    return coords_df.drop(columns=['z', 'mask'])'''
-
 
 
 def create_event_mask(event_label, start_date, end_date, labelcube, land_mask):
